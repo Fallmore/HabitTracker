@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">HabitTracker</string>
+    <string name="title_activity_main_menu">MainMenu</string>
+</resources>
