@@ -1,13 +1,18 @@
 package com.example.habittracker.model
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "habits")
 data class Habit(
-    val id: Int,
-    val name: String,
-    val description: String,
-    val streak: Int = 0,
-    val isCompleted: Boolean = false,
-    val imageUri: String? = null, // URI изображения как строка
-    val buddyName: String? = null, // Имя друга
-    val buddyPhone: String? = null // Телефон друга
+    @PrimaryKey(autoGenerate = true)
+    var id: Int = 0,
+    var name: String,
+    var description: String,
+    var streak: Int = 0,
+    var isCompleted: Boolean = false,
+    var imageUri: String? = null, // URI изображения как строка
+    var buddyName: String? = null, // Имя друга
+    var buddyPhone: String? = null // Телефон друга
 )
     : java.io.Serializable // Добавляем для работы с файловой системы

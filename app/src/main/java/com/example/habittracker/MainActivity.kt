@@ -17,8 +17,16 @@ import android.net.Uri
 import android.view.Menu
 import android.view.MenuItem
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.example.habittracker.localDB.AppDatabase
+import com.example.habittracker.repository.HabitRepository
+import com.example.habittracker.localDB.HabitUiState
+import com.example.habittracker.localDB.HabitViewModel
 import com.example.habittracker.utils.FileUtils
 import com.yourname.habittracker.network.SimpleNetworkMonitor
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,6 +37,8 @@ class MainActivity : AppCompatActivity() {
         setupRecyclerView()
         setupClickListeners()
         setupNetworkMonitoring()
+        initRoomComponents()
+        observeHabits()
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
@@ -44,15 +54,6 @@ class MainActivity : AppCompatActivity() {
     // Адаптер, главный посредник между данными и RecyclerView
     private lateinit var habitAdapter: HabitAdapter
     private var habitIdCounter = 0
-
-    // Временный список привычек для демонстрации
-    private val sampleHabits = mutableListOf(
-        Habit(++habitIdCounter, "Утренняя зарядка", "15 минут упражнений", 5, false),
-        Habit(++habitIdCounter, "Чтение книги", "30 минут чтения", 12, true),
-        Habit(++habitIdCounter, "Пить воду", "2 литра в день", 3, false),
-        Habit(++habitIdCounter, "Изучение английского", "Новые слова и грамматика", 7, true),
-        Habit(++habitIdCounter, "Прогулка", "Прогулка на свежем воздухе 30 мин", 0, false)
-    )
 
     // Launcher для получения результата из AddHabitActivity
     private val addHabitLauncher = registerForActivityResult(
@@ -83,11 +84,7 @@ class MainActivity : AppCompatActivity() {
                 streak = if (isChecked) habit.streak + 1 else habit.streak
             )
 
-            // Обновляем в нашем списке
-            updateHabitInList(updatedHabit)
-
-            // Обновляем в адаптере
-            habitAdapter.updateHabit(updatedHabit)
+            habitViewModel.updateHabit(updatedHabit)
 
             val message = if (isChecked) {
                 "${habit.name} выполнена! Серия: ${habit.streak + 1} дней"
@@ -103,9 +100,6 @@ class MainActivity : AppCompatActivity() {
             // Связываем адаптер с RecyclerView
             adapter = habitAdapter
         }
-
-        // Устанавливаем начальный список
-        habitAdapter.setHabits(sampleHabits)
     }
 
     private fun setupClickListeners() {
@@ -140,7 +134,6 @@ class MainActivity : AppCompatActivity() {
 
         // Создаем новую привычку
         val newHabit = Habit(
-            id = habitIdCounter++,
             name = name,
             description = fullDescription,
             streak = 0,
@@ -150,11 +143,9 @@ class MainActivity : AppCompatActivity() {
             buddyPhone = contactPhone
         )
 
-        // Добавляем в наш список
-        sampleHabits.add(0, newHabit)
-
-        // Добавляем в адаптер (безопасно)
-        habitAdapter.addHabit(newHabit)
+        // Сохраняем в БД
+        //habitViewModel.insertHabit(newHabit)
+        habitViewModel.addHabitWithSync(newHabit)
 
         // Показываем информацию о выбранных данных
         var message = "Привычка \"$name\" добавлена!"
@@ -165,14 +156,7 @@ class MainActivity : AppCompatActivity() {
             message += "\nИзображение добавлено"
         }
 
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-    }
-
-    private fun updateHabitInList(updatedHabit: Habit) {
-        val index = sampleHabits.indexOfFirst { it.id == updatedHabit.id }
-        if (index != -1) {
-            sampleHabits[index] = updatedHabit
-        }
+        // Toast показывается автоматически через observeHabits()
     }
     //endregion
 
@@ -210,14 +194,19 @@ class MainActivity : AppCompatActivity() {
                 restoreFromBackup()
                 true
             }
+            R.id.action_sync -> { // Новая кнопка синхронизации
+                syncWithServer()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
 
     private fun createBackup() {
-        val success = FileUtils.saveHabitsToFile(this, sampleHabits)
+        val currentHabits = habitAdapter.currentList
+        val success = FileUtils.saveHabitsToFile(this, currentHabits)
         val message = if (success) {
-            "Бэкап создан! Сохранено ${sampleHabits.size} привычек"
+            "Бэкап создан! Сохранено ${currentHabits.size} привычек"
         } else {
             "Ошибка при создании бэкапа"
         }
@@ -232,9 +221,14 @@ class MainActivity : AppCompatActivity() {
 
         val restoredHabits = FileUtils.loadHabitsFromFile(this)
         if (restoredHabits != null) {
-            sampleHabits.clear()
-            sampleHabits.addAll(restoredHabits)
-            habitAdapter.setHabits(sampleHabits)
+            // Удаляем все текущие привычки и добавляем восстановленные
+            lifecycleScope.launch {
+                habitViewModel.habits.collect { currentHabits ->
+                    currentHabits.forEach { habitViewModel.deleteHabit(it) }
+                }
+
+                restoredHabits.forEach { habitViewModel.insertHabit(it) }
+            }
 
             Toast.makeText(this, "Восстановлено ${restoredHabits.size} привычек", Toast.LENGTH_LONG).show()
         } else {
@@ -243,5 +237,58 @@ class MainActivity : AppCompatActivity() {
     }
     //endregion
 
+    //region ЛР 6 локальная БД
+    // Room компоненты
+    private lateinit var habitViewModel: HabitViewModel
 
+    private fun initRoomComponents() {
+        val database = AppDatabase.getInstance(this)
+        val repository = HabitRepository(database.habitDao())
+        habitViewModel = HabitViewModel(repository)
+    }
+
+    private fun observeHabits() {
+        // Подписываемся на Flow из БД
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                habitViewModel.habits.collect { habits ->
+                    habitAdapter.setHabits(habits)
+
+                    // Обновляем счетчик ID
+                    if (habits.isNotEmpty()) {
+                        habitIdCounter = habits.maxByOrNull { it.id }?.id?.plus(1) ?: 1
+                    }
+                }
+            }
+        }
+
+        // Наблюдаем за состоянием UI
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                habitViewModel.uiState.collect { state ->
+                    when (state) {
+                        is HabitUiState.Success -> {
+                            Toast.makeText(this@MainActivity, state.message, Toast.LENGTH_SHORT).show()
+                        }
+                        is HabitUiState.Error -> {
+                            Toast.makeText(this@MainActivity, state.message, Toast.LENGTH_LONG).show()
+                        }
+                        HabitUiState.Loading -> {
+                            // Можно показать ProgressBar
+                        }
+                    }
+                }
+            }
+        }
+    }
+    //endregion
+
+    //region ЛР 7 удаленная БД
+
+    // Метод синхронизации
+    private fun syncWithServer() {
+        habitViewModel.syncWithServer()
+    }
+
+    //endregion
 }
