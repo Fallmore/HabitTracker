@@ -8,6 +8,7 @@ pluginManagement {
             }
         }
         mavenCentral()
+        maven("https://maven.google.com/")
         gradlePluginPortal()
     }
 }

@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.habittracker"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -90,4 +90,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.1")
     implementation (libs.androidx.runtime.livedata)
     kapt("androidx.room:room-compiler:2.8.1")
+
+    // Яндекс Карты
+    implementation("com.yandex.android:maps.mobile:4.22.0-lite")
 }

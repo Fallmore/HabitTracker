@@ -3,6 +3,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_map"
+        android:title="Карта"
+        android:icon="@android:drawable/ic_dialog_map"
+        app:showAsAction="ifRoom" />
+
+    <item
         android:id="@+id/action_sync"
         android:title="Синхронизация"
         android:icon="@android:drawable/ic_menu_upload"
