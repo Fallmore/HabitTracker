@@ -13,7 +13,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.activity.enableEdgeToEdge
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.view.Menu
 import android.view.MenuItem
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +30,7 @@ import com.example.habittracker.localDB.HabitViewModel
 import com.example.habittracker.utils.FileUtils
 import com.yourname.habittracker.network.SimpleNetworkMonitor
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,6 +43,8 @@ class MainActivity : AppCompatActivity() {
         setupNetworkMonitoring()
         initRoomComponents()
         observeHabits()
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
@@ -301,6 +307,93 @@ class MainActivity : AppCompatActivity() {
     private fun openMap() {
         val intent = Intent(this, MapActivity::class.java)
         startActivity(intent)
+    }
+
+    //endregion
+
+    //region ЛР 9 датчики
+
+    private lateinit var sensorManager: SensorManager
+    private var lastUpdate = 0L
+    private var lastX = 0f
+    private var lastY = 0f
+    private var lastZ = 0f
+
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            event?.let {
+                val currentTime = System.currentTimeMillis()
+                if ((currentTime - lastUpdate) > 100) {
+                    val diffTime = currentTime - lastUpdate
+                    lastUpdate = currentTime
+
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    val z = event.values[2]
+
+                    val speed = abs(x + y + z - lastX - lastY - lastZ) / diffTime * 10000
+
+                    if (speed > 800) {
+                        // Встряхивание обнаружено!
+                        onShakeDetected(speed)
+                    }
+
+                    lastX = x
+                    lastY = y
+                    lastZ = z
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private val sensorLightListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            event?.let {
+                val light = it.values[0]
+                if (light < 50f) {
+                    onLightDetected("в темноте")
+                } else if (light > 2000f) {
+                    onLightDetected("на свету")
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private fun onShakeDetected(speedShake: Float) {
+        runOnUiThread {
+            Toast.makeText(this, "Телефон встряхнут со скоростью $speedShake", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun onLightDetected(text: String) {
+        runOnUiThread {
+            Toast.makeText(this, "Телефон находится $text", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        sensorManager.registerListener(
+            sensorListener,
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+            SensorManager.SENSOR_DELAY_NORMAL
+        )
+
+        sensorManager.registerListener(
+            sensorLightListener,
+            sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT),
+            SensorManager.SENSOR_DELAY_NORMAL
+        )
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(sensorListener)
+        sensorManager.unregisterListener(sensorLightListener)
     }
 
     //endregion
