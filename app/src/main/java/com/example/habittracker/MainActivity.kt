@@ -12,24 +12,35 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.activity.enableEdgeToEdge
 import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.view.Menu
 import android.view.MenuItem
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.habittracker.localDB.AppDatabase
 import com.example.habittracker.repository.HabitRepository
 import com.example.habittracker.localDB.HabitUiState
 import com.example.habittracker.localDB.HabitViewModel
 import com.example.habittracker.utils.FileUtils
+import com.example.habittracker.worker.HabitReminderWorker
 import com.yourname.habittracker.network.SimpleNetworkMonitor
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
@@ -43,7 +54,10 @@ class MainActivity : AppCompatActivity() {
         setupNetworkMonitoring()
         initRoomComponents()
         observeHabits()
-
+        createNotificationChannel()
+        initServices()
+        scheduleDailyReminder()
+        checkNotificationPermission()
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -192,6 +206,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
+            R.id.action_test_notification -> {
+                testNotification()
+                true
+            }
             R.id.action_map -> {
                 openMap()
                 true
@@ -392,8 +410,79 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        testNotification()
         sensorManager.unregisterListener(sensorListener)
         sensorManager.unregisterListener(sensorLightListener)
+    }
+
+    //endregion
+
+    //region ЛР 10 уведомления
+
+    private lateinit var notificationService: NotificationService
+    private lateinit var workManager: WorkManager
+
+    companion object {
+        const val NOTIFICATION_CHANNEL_ID = "habit_reminders"
+        const val NOTIFICATION_ID = 1
+    }
+
+    private fun initServices() {
+        notificationService = NotificationService(this)
+        workManager = WorkManager.getInstance(this)
+    }
+
+    private fun scheduleDailyReminder() {
+        // Создаем ежедневное напоминание на 9:00 утра
+        val dailyReminderRequest = PeriodicWorkRequestBuilder<HabitReminderWorker>(
+            24, TimeUnit.HOURS, // Повторять каждые 24 часа
+            15, TimeUnit.MINUTES // Гибкое окно 15 минут
+        ).build()
+
+        workManager.enqueueUniquePeriodicWork(
+            "daily_habit_reminder",
+            ExistingPeriodicWorkPolicy.KEEP, // Сохранять существующую работу
+            dailyReminderRequest
+        )
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Напоминания о привычках"
+            val description = "Уведомления о выполнении ежедневных привычек"
+            val importance = NotificationManager.IMPORTANCE_DEFAULT
+
+            val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance)
+            channel.description = description
+
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun testNotification() {
+        val habits = habitAdapter.currentList
+        if (habits.isNotEmpty()) {
+            notificationService.showRandomHabitReminder(habits)
+        }
+    }
+
+    private fun checkNotificationPermission() {
+        when {
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.READ_MEDIA_IMAGES
+            ) == PackageManager.PERMISSION_GRANTED -> {
+            }
+            else -> {
+                // Запрашиваем разрешение
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                    1
+                )
+            }
+        }
     }
 
     //endregion

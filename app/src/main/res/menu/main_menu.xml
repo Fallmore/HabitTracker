@@ -3,6 +3,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_test_notification"
+        android:title="Тест уведомления"
+        android:icon="@android:drawable/ic_dialog_info"
+        app:showAsAction="ifRoom" />
+
+    <item
         android:id="@+id/action_map"
         android:title="Карта"
         android:icon="@android:drawable/ic_dialog_map"
